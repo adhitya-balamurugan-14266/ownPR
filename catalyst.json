@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "targets": [
+      "pr_trail_api"
+    ],
+    "ignore": [],
+    "source": "functions"
+  },
+  "slate": [
+    {
+      "name": "pr-trail-ui",
+      "source": "/Users/adhitya-14266/ClaudeApps/OwnPR/pr-trail-ui"
+    }
+  ]
+}

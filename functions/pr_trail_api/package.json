@@ -1,0 +1,9 @@
+{
+	"name": "pr_trail_api",
+	"version": "1.0.0",
+	"main": "index.js",
+	"author": "adhitya.balamurugan@zohocorp.com",
+	"dependencies": {
+		"zcatalyst-sdk-node": "latest"
+	}
+}
