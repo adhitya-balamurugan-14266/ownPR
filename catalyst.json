@@ -1,7 +1,8 @@
 {
   "functions": {
     "targets": [
-      "pr_trail_api"
+      "pr_trail_api",
+      "rest_day_checker"
     ],
     "ignore": [],
     "source": "functions"

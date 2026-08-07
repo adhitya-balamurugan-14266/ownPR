@@ -132,11 +132,14 @@ export default function ExerciseTable({ logId, onPR }) {
                 {Array.from({ length: maxSets }, (_, i) => (
                   <th key={i}>Set {i + 1}</th>
                 ))}
+                <th className="total-th">Total</th>
               </tr>
             </thead>
             <tbody>
               {order.map(name => {
                 const sets = [...groups[name]].sort((a, b) => a.set_number - b.set_number);
+                const totalReps = sets.reduce((s, e) => s + parseInt(e.reps), 0);
+                const totalVol  = sets.reduce((s, e) => s + parseFloat(e.weight) * parseInt(e.reps), 0);
                 return (
                   <tr key={name}>
                     <td className="exercise-name">{name}</td>
@@ -181,6 +184,10 @@ export default function ExerciseTable({ logId, onPR }) {
                         </td>
                       );
                     })}
+                    <td className="total-cell">
+                      <div className="total-reps">{totalReps} reps</div>
+                      <div className="total-vol">{totalVol % 1 === 0 ? totalVol : totalVol.toFixed(1)} kg vol</div>
+                    </td>
                   </tr>
                 );
               })}

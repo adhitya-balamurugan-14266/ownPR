@@ -1,0 +1,11 @@
+{
+  "deployment": {
+    "name": "rest_day_checker",
+    "stack": "node24",
+    "type": "job",
+    "env_variables": {}
+  },
+  "execution": {
+    "main": "index.js"
+  }
+}
