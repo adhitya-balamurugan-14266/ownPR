@@ -260,6 +260,12 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
 .exercise-table tbody tr:hover td { background: var(--surface); }
 .exercise-name { font-weight: 600; font-size: 14px; }
 .set-cell { font-family: var(--mono); font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.pr-cell {
+  border: 1px solid rgba(255, 215, 0, 0.55) !important;
+  background: rgba(255, 215, 0, 0.06) !important;
+  color: #ffd700 !important;
+  border-radius: 4px;
+}
 
 /* ── Add entry form ── */
 .add-entry-form {
@@ -299,6 +305,59 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   white-space: nowrap;
 }
 .delete-session-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(227,41,41,0.08); }
+
+/* ── PR badge (header chip) ── */
+.pr-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  padding: 3px 9px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── PR detail strip (always visible below row header) ── */
+.pr-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  background: rgba(255, 215, 0, 0.04);
+  border-top: 1px solid rgba(255, 215, 0, 0.1);
+  flex-wrap: wrap;
+}
+
+.pr-detail-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pr-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pr-detail-dot {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0 3px;
+}
+
+.pr-detail-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pr-detail-vals {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: #ffd700;
+}
 
 /* ── History log delete button ── */
 .log-delete-btn {
@@ -371,6 +430,33 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   background: var(--surface2);
   color: var(--text-muted);
   border: 1px solid var(--border);
+}
+
+/* ── PR sync row ── */
+.pr-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.pr-sync-btn {
+  background: none;
+  border: 1px dashed rgba(255, 215, 0, 0.4);
+  color: #ffd700;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.pr-sync-btn:hover:not(:disabled) { background: rgba(255, 215, 0, 0.06); }
+.pr-sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.pr-sync-msg {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* ── History ── */
@@ -467,6 +553,13 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   object-fit: contain;
 }
 
+.landing-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
 .landing-cta {
   background: var(--accent);
   color: #fff;
@@ -481,6 +574,71 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   transition: filter 0.15s;
 }
 .landing-cta:hover { filter: brightness(1.15); }
+
+.landing-secondary {
+  background: none;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border-radius: 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s;
+}
+.landing-secondary:hover { border-color: #ffd700; color: #ffd700; }
+
+/* ── Current PRs modal ── */
+.current-prs-card {
+  max-width: 560px;
+  width: 92%;
+}
+
+.current-prs-scroll {
+  max-height: 55vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.current-prs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.current-prs-table th {
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 9px 12px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.current-prs-table td {
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: var(--mono);
+  color: #ffd700;
+  border-bottom: 1px solid var(--border);
+}
+
+.current-prs-table td.exercise-name {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.current-prs-table tbody tr:last-child td { border-bottom: none; }
 
 /* ── Exercise locked + next exercise ── */
 .exercise-locked {
@@ -516,25 +674,36 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
 .btn-next-exercise:hover { border-color: var(--text-muted); color: var(--text); }
 
 /* ── Set cell edit/delete ── */
-.set-cell-hover { position: relative; }
-.set-cell-hover .row-actions {
-  display: none;
-  gap: 4px;
-  margin-left: 6px;
-}
-.set-cell-hover:hover .row-actions { display: inline-flex; }
+.set-cell-editable { cursor: pointer; }
+.set-cell-editable:hover .set-val { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 
 .set-cell-editing {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 2px 0;
 }
 .set-cell-editing input {
   width: 52px;
   padding: 4px 6px;
   font-size: 12px;
 }
-.set-cell-editing .row-actions { display: inline-flex; gap: 4px; margin-left: 4px; }
+.set-sep { color: var(--text-muted); font-size: 11px; }
+
+/* ── Exercise rename inline input ── */
+.exercise-name-text { cursor: text; }
+.rename-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  width: 100%;
+  outline: none;
+  padding: 0 0 1px;
+}
 
 .set-val { font-family: var(--mono); font-size: 13px; color: var(--text-muted); }
 
@@ -675,6 +844,120 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   opacity: 0.7;
   font-family: var(--mono);
   line-height: 1.4;
+}
+
+/* ── Your Progress button ── */
+.btn-your-progress {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 5px;
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  background: rgba(129, 140, 248, 0.08);
+  color: #818cf8;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.btn-your-progress:hover {
+  background: rgba(129, 140, 248, 0.18);
+  border-color: #818cf8;
+}
+
+/* ── Month Progress Panel ── */
+.month-progress-panel {
+  padding: 16px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.month-progress-verdict {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+/* ── Body Part Breakdown Panel ── */
+.body-part-panel {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.body-part-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.body-part-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.body-part-close:hover { background: var(--border); color: var(--text); }
+
+.body-part-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bp-label {
+  font-size: 12px;
+  color: var(--text);
+  width: 150px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bp-bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.bp-bar-fill {
+  height: 100%;
+  background: #4caf50;
+  border-radius: 5px;
+  transition: width 0.3s ease;
+  opacity: 0.8;
+}
+
+.bp-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4caf50;
+  font-family: var(--mono);
+  width: 20px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 /* ── Responsive ── */

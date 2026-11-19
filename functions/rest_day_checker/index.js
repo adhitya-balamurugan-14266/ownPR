@@ -42,7 +42,7 @@ module.exports = async (jobData, context) => {
 
     console.log(`[rest_day_checker] Consecutive REST days: ${consecutiveRest}`);
 
-    if (consecutiveRest >= 2) {
+    if (consecutiveRest >= 3) {
       const email = app.email();
       await email.sendMail({
         from_email: OWNER_EMAIL,

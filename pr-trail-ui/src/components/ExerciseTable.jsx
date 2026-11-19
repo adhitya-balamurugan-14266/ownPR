@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { addEntry, fetchEntries, updateEntry, deleteEntry } from '../api.js';
+import { addEntry, fetchEntries, updateEntry, deleteEntry, fetchExercises } from '../api.js';
+
+// Exercises where LESS weight means MORE strength (assisted machines)
+const INVERTED_WEIGHT_EXERCISES = new Set(['Assisted Dips', 'Assisted Pullups']);
 
 function buildPivot(entries) {
   const groups = {};
@@ -11,7 +14,9 @@ function buildPivot(entries) {
     }
     groups[e.exercise_name].push(e);
   }
-  const maxSets = order.length === 0 ? 0 : Math.max(...order.map(n => groups[n].length));
+  const maxSets = order.length === 0 ? 0 : Math.max(
+    ...order.map(n => Math.max(...groups[n].map(e => parseInt(e.set_number) || 0)))
+  );
   return { groups, order, maxSets };
 }
 
@@ -20,22 +25,31 @@ export default function ExerciseTable({ logId, onPR }) {
   const [loading,         setLoading]         = useState(true);
   const [error,           setError]           = useState('');
 
-  // Current locked exercise
   const [currentExercise, setCurrentExercise] = useState('');
   const [exerciseInput,   setExerciseInput]   = useState('');
-  const [reps,            setReps]            = useState('');
   const [weight,          setWeight]          = useState('');
+  const [reps,            setReps]            = useState('');
   const [submitting,      setSubmitting]      = useState(false);
 
-  // Inline edit state
+  // Inline cell edit state
   const [editId,     setEditId]     = useState(null);
-  const [editReps,   setEditReps]   = useState('');
   const [editWeight, setEditWeight] = useState('');
-  const [saving,     setSaving]     = useState(false);
+  const [editReps,   setEditReps]   = useState('');
+
+  // Exercise rename state
+  const [renamingExercise, setRenamingExercise] = useState(null);
+  const [renameValue,      setRenameValue]      = useState('');
+
+  const [savedExercises, setSavedExercises] = useState([]);
+  // PR records hit this session: { [exercise_name]: [{ metric, new_best }, ...] }
+  const [sessionPRs, setSessionPRs] = useState({});
 
   useEffect(() => {
-    fetchEntries(logId)
-      .then(setEntries)
+    Promise.all([fetchEntries(logId), fetchExercises()])
+      .then(([entries, names]) => {
+        setEntries(entries);
+        setSavedExercises(names);
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [logId]);
@@ -49,18 +63,27 @@ export default function ExerciseTable({ logId, onPR }) {
   async function handleAddSet(e) {
     e.preventDefault();
     const exercise = currentExercise || exerciseInput.trim();
-    if (!exercise || !reps || !weight) return;
+    if (!exercise || !weight || !reps) return;
     setError('');
     setSubmitting(true);
     try {
       const setNum = nextSetFor(exercise);
       const result = await addEntry(logId, exercise, setNum, parseInt(reps), parseFloat(weight));
       setEntries(prev => [...prev, result.entry]);
-      if (result.pr_hit) onPR(exercise, result.pr_metric);
-      // Lock exercise name after first add, clear only reps + weight
-      if (!currentExercise) setCurrentExercise(exercise);
-      setReps('');
+      if (result.pr_hit) {
+        onPR(exercise, result.pr_metric);
+        setSessionPRs(prev => {
+          const existing = prev[exercise] || [];
+          return { ...prev, [exercise]: [...existing, { metric: result.pr_metric, new_best: result.new_best }] };
+        });
+      }
+      if (!currentExercise) {
+        setCurrentExercise(exercise);
+        // Backend auto-inserts the new name; update local list optimistically
+        setSavedExercises(prev => [...new Set([...prev, exercise])].sort());
+      }
       setWeight('');
+      setReps('');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -71,45 +94,69 @@ export default function ExerciseTable({ logId, onPR }) {
   function handleNextExercise() {
     setCurrentExercise('');
     setExerciseInput('');
-    setReps('');
     setWeight('');
+    setReps('');
   }
 
+  // ── Cell blur: commit or delete ───────────────────────────────────────────
   function startEdit(entry) {
     setEditId(entry.ROWID);
-    setEditReps(String(entry.reps));
     setEditWeight(String(entry.weight));
+    setEditReps(String(entry.reps));
   }
 
-  function cancelEdit() {
+  async function handleCellBlur(entry, e) {
+    if (e.currentTarget.contains(e.relatedTarget)) return; // focus still inside cell
+
+    const w = editWeight.trim();
+    const r = editReps.trim();
+
     setEditId(null);
-    setEditReps('');
     setEditWeight('');
-  }
+    setEditReps('');
 
-  async function handleSaveEdit(entry) {
-    setSaving(true);
-    try {
-      const updated = await updateEntry(
-        entry.ROWID,
-        entry.exercise_name,
-        entry.set_number,
-        parseInt(editReps),
-        parseFloat(editWeight)
-      );
-      setEntries(prev => prev.map(e => e.ROWID === entry.ROWID ? { ...e, ...updated } : e));
-      cancelEdit();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+    if (!w && !r) {
+      // Both cleared → delete
+      try {
+        await deleteEntry(entry.ROWID);
+        setEntries(prev => prev.filter(en => en.ROWID !== entry.ROWID));
+      } catch (err) {
+        setError(err.message);
+      }
+    } else {
+      // Save with provided values; fall back to original if a field was left blank
+      const newWeight = w !== '' ? parseFloat(w) : parseFloat(entry.weight);
+      const newReps   = r !== '' ? parseInt(r)   : parseInt(entry.reps);
+      if (newWeight === parseFloat(entry.weight) && newReps === parseInt(entry.reps)) return;
+      try {
+        const updated = await updateEntry(entry.ROWID, entry.exercise_name, entry.set_number, newReps, newWeight);
+        setEntries(prev => prev.map(en => en.ROWID === entry.ROWID ? { ...en, ...updated } : en));
+      } catch (err) {
+        setError(err.message);
+      }
     }
   }
 
-  async function handleDelete(entryId) {
+  // ── Exercise rename ───────────────────────────────────────────────────────
+  function startRename(name) {
+    setRenamingExercise(name);
+    setRenameValue(name);
+  }
+
+  async function handleRenameBlur(oldName) {
+    const newName = renameValue.trim();
+    setRenamingExercise(null);
+    if (!newName || newName === oldName) return;
+
+    const toRename = entries.filter(e => e.exercise_name === oldName);
     try {
-      await deleteEntry(entryId);
-      setEntries(prev => prev.filter(e => e.ROWID !== entryId));
+      await Promise.all(
+        toRename.map(e => updateEntry(e.ROWID, newName, e.set_number, parseInt(e.reps), parseFloat(e.weight)))
+      );
+      setEntries(prev => prev.map(e => e.exercise_name === oldName ? { ...e, exercise_name: newName } : e));
+      if (currentExercise === oldName) setCurrentExercise(newName);
+      // Backend auto-inserts the renamed name; update local list optimistically
+      setSavedExercises(prev => [...new Set([...prev, newName])].sort());
     } catch (err) {
       setError(err.message);
     }
@@ -119,7 +166,7 @@ export default function ExerciseTable({ logId, onPR }) {
 
   const { groups, order, maxSets } = buildPivot(entries);
   const knownExercises = order;
-  const isLocked = !!currentExercise;
+  const allExercises = [...new Set([...savedExercises, ...knownExercises])].sort();
 
   return (
     <div className="exercise-table-wrap">
@@ -142,14 +189,52 @@ export default function ExerciseTable({ logId, onPR }) {
                 const totalVol  = sets.reduce((s, e) => s + parseFloat(e.weight) * parseInt(e.reps), 0);
                 return (
                   <tr key={name}>
-                    <td className="exercise-name">{name}</td>
+                    <td className="exercise-name">
+                      {renamingExercise === name ? (
+                        <input
+                          className="rename-input"
+                          type="text"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameBlur(name)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') e.target.blur();
+                            if (e.key === 'Escape') setRenamingExercise(null);
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className="exercise-name-text"
+                          onDoubleClick={() => startRename(name)}
+                          title="Double-click to rename"
+                        >
+                          {name}
+                        </span>
+                      )}
+                    </td>
                     {Array.from({ length: maxSets }, (_, i) => {
-                      const s = sets[i];
+                      const s = sets.find(e => parseInt(e.set_number) === i + 1);
                       if (!s) return <td key={i} className="set-cell">—</td>;
+
+                      const prsForEx = sessionPRs[name] || [];
+                      const weightPR = prsForEx.find(p => p.metric === 'weight');
+                      const repsPR   = prsForEx.find(p => p.metric === 'reps');
+                      const setsPR   = prsForEx.find(p => p.metric === 'sets');
+                      const isWPR = weightPR && (INVERTED_WEIGHT_EXERCISES.has(name)
+                        ? parseFloat(s.weight) <= parseFloat(weightPR.new_best)
+                        : parseFloat(s.weight) >= parseFloat(weightPR.new_best));
+                      const isRPR = repsPR   && parseInt(s.reps)     >= parseInt(repsPR.new_best);
+                      const isSPR = setsPR   && s === sets[sets.length - 1] && sets.length >= parseInt(setsPR.new_best);
+                      const isPR  = isWPR || isRPR || isSPR;
 
                       if (editId === s.ROWID) {
                         return (
-                          <td key={i} className="set-cell set-cell-editing">
+                          <td
+                            key={i}
+                            className="set-cell set-cell-editing"
+                            onBlur={e => handleCellBlur(s, e)}
+                          >
                             <input
                               type="number"
                               value={editWeight}
@@ -157,30 +242,29 @@ export default function ExerciseTable({ logId, onPR }) {
                               placeholder="kg"
                               min="0"
                               step="0.5"
+                              autoFocus
                             />
-                            <span>×</span>
+                            <span className="set-sep">×</span>
                             <input
                               type="number"
                               value={editReps}
                               onChange={e => setEditReps(e.target.value)}
                               placeholder="reps"
                               min="1"
+                              onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
                             />
-                            <div className="row-actions">
-                              <button className="btn-icon btn-save" onClick={() => handleSaveEdit(s)} disabled={saving} title="Save">✓</button>
-                              <button className="btn-icon btn-cancel" onClick={cancelEdit} title="Cancel">✕</button>
-                            </div>
                           </td>
                         );
                       }
 
                       return (
-                        <td key={i} className="set-cell set-cell-hover">
+                        <td
+                          key={i}
+                          className={`set-cell set-cell-editable${isPR ? ' pr-cell' : ''}`}
+                          onDoubleClick={() => startEdit(s)}
+                          title="Double-click to edit · clear both fields to delete"
+                        >
                           <span className="set-val">{parseFloat(s.weight)}kg × {s.reps}</span>
-                          <div className="row-actions">
-                            <button className="btn-icon btn-edit" onClick={() => startEdit(s)} title="Edit">✏</button>
-                            <button className="btn-icon btn-del"  onClick={() => handleDelete(s.ROWID)} title="Delete">✕</button>
-                          </div>
                         </td>
                       );
                     })}
@@ -196,9 +280,8 @@ export default function ExerciseTable({ logId, onPR }) {
         </div>
       )}
 
-      {/* Add-set form */}
       <form className="add-entry-form" onSubmit={handleAddSet}>
-        {isLocked ? (
+        {currentExercise ? (
           <div className="exercise-locked">
             <span className="locked-name">{currentExercise}</span>
             <button type="button" className="btn-next-exercise" onClick={handleNextExercise}>
@@ -216,16 +299,8 @@ export default function ExerciseTable({ logId, onPR }) {
           />
         )}
         <datalist id="exercise-datalist">
-          {knownExercises.map(n => <option key={n} value={n} />)}
+          {allExercises.map(n => <option key={n} value={n} />)}
         </datalist>
-        <input
-          type="number"
-          placeholder="Reps"
-          value={reps}
-          onChange={e => setReps(e.target.value)}
-          min="1"
-          required
-        />
         <input
           type="number"
           placeholder="kg"
@@ -233,6 +308,14 @@ export default function ExerciseTable({ logId, onPR }) {
           onChange={e => setWeight(e.target.value)}
           min="0"
           step="0.5"
+          required
+        />
+        <input
+          type="number"
+          placeholder="Reps"
+          value={reps}
+          onChange={e => setReps(e.target.value)}
+          min="1"
           required
         />
         <button type="submit" disabled={submitting}>

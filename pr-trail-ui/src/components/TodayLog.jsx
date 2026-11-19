@@ -7,7 +7,7 @@ import CloseLog from './CloseLog.jsx';
 
 const BODY_PARTS = [
   'Chest', 'Shoulders', 'Back', 'Arms', 'Legs', 'Cardio',
-  'Chest and Triceps', 'Shoulders and Legs', 'Back and Biceps',
+  'Chest and Triceps', 'Shoulders and Legs', 'Back and Biceps', 'Arms and Legs',
   'Push Day', 'Pull Day', 'Custom'
 ];
 
@@ -171,14 +171,14 @@ export default function TodayLog() {
       {confirmDelete && (
         <ConfirmModal
           title="Delete Session"
-          message="Delete today's entire session? All sets will be permanently removed."
+          message={"Delete today's entire session? All sets will be permanently removed."}
           onConfirm={() => { setConfirmDelete(false); handleDeleteLog(); }}
           onCancel={() => setConfirmDelete(false)}
         />
       )}
       <div className="log-action-row">
         <button className="close-log-btn" onClick={() => setShowClose(true)}>
-          Close Today's Log
+          Close Today&apos;s Log
         </button>
         <button className="btn-icon btn-del delete-session-btn" onClick={() => setConfirmDelete(true)} disabled={deleting}>
           {deleting ? '…' : '🗑 Delete Session'}

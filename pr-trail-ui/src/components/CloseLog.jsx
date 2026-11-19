@@ -31,7 +31,7 @@ export default function CloseLog({ logId, onClose, onCancel }) {
               checked={bcaaTaken}
               onChange={e => setBcaaTaken(e.target.checked)}
             />
-            BCAA taken?
+            Whey taken?
           </label>
         </div>
 

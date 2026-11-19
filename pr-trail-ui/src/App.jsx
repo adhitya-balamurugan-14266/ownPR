@@ -18,6 +18,7 @@ export default function App() {
         <nav>
           <button className={tab === 'today'   ? 'active' : ''} onClick={() => setTab('today')}>Today</button>
           <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>History</button>
+          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v8</span>
         </nav>
       </header>
       <main>

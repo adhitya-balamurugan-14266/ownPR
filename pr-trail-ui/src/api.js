@@ -59,3 +59,23 @@ export async function updateEntry(entryId, exercise_name, set_number, reps, weig
 export async function deleteEntry(entryId) {
   return apiFetch(`/entry/${entryId}`, { method: 'DELETE' });
 }
+
+export async function fetchExercises() {
+  return apiFetch('/exercises');
+}
+
+export async function fetchPRs() {
+  return apiFetch('/prs');
+}
+
+export async function backfillPRs() {
+  return apiFetch('/backfill-prs', { method: 'POST' });
+}
+
+export async function fetchCurrentPRs() {
+  return apiFetch('/current-prs');
+}
+
+export async function exportAllData() {
+  return apiFetch('/export');
+}

@@ -29,10 +29,37 @@ function flatRow(row, tableName) {
   return row[tableName] || row;
 }
 
-async function checkPR(zcql, exerciseName, logId) {
-  const safeName = exerciseName.replace(/'/g, "''");
+// Exercises where LESS weight means MORE strength (assisted machines)
+const INVERTED_WEIGHT_EXERCISES = new Set(['Assisted Dips', 'Assisted Pullups']);
 
-  // Fetch closed log IDs and all entries for this exercise separately (no JOIN)
+function aggregateWeight(entries, inverted) {
+  const weights = entries.map(e => parseFloat(e.weight)).filter(w => !isNaN(w));
+  if (weights.length === 0) return inverted ? Infinity : 0;
+  return inverted ? Math.min(...weights) : Math.max(...weights);
+}
+
+function isWeightImprovement(curr, hist, inverted) {
+  return inverted ? curr < hist : curr > hist;
+}
+
+async function fetchAll(zcql, baseQuery, tableName) {
+  const rows = [];
+  let offset = 0;
+  const pageSize = 200;
+  while (true) {
+    const result = await zcql.executeZCQLQuery(`${baseQuery} LIMIT ${offset}, ${pageSize}`);
+    const page = result.map(r => r[tableName]).filter(Boolean);
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return rows;
+}
+
+async function checkPR(zcql, datastore, exerciseName, logId) {
+  const safeName = exerciseName.replace(/'/g, "''");
+  const inverted = INVERTED_WEIGHT_EXERCISES.has(exerciseName);
+
   const closedResult = await zcql.executeZCQLQuery(
     `SELECT ROWID FROM WorkoutLog WHERE is_closed = 'true' LIMIT 0, 300`
   );
@@ -40,9 +67,7 @@ async function checkPR(zcql, exerciseName, logId) {
     closedResult.map(r => r.WorkoutLog).filter(Boolean).map(r => String(r.ROWID))
   );
 
-  if (closedIds.size === 0) {
-    return { pr_hit: false, pr_metric: null };
-  }
+  if (closedIds.size === 0) return { pr_hit: false, pr_metric: null };
 
   const allEntryResult = await zcql.executeZCQLQuery(
     `SELECT * FROM ExerciseEntry WHERE exercise_name = '${safeName}' LIMIT 0, 300`
@@ -52,9 +77,7 @@ async function checkPR(zcql, exerciseName, logId) {
     .filter(Boolean)
     .filter(e => String(e.log_id) !== String(logId) && closedIds.has(String(e.log_id)));
 
-  if (pastEntries.length === 0) {
-    return { pr_hit: false, pr_metric: null };
-  }
+  if (pastEntries.length === 0) return { pr_hit: false, pr_metric: null };
 
   const pastBySession = {};
   for (const e of pastEntries) {
@@ -63,12 +86,12 @@ async function checkPR(zcql, exerciseName, logId) {
     pastBySession[lid].push(e);
   }
 
-  let histBestWeight = 0, histBestReps = 0, histBestSets = 0;
+  let histBestWeight = inverted ? Infinity : 0, histBestReps = 0, histBestSets = 0;
   for (const entries of Object.values(pastBySession)) {
-    const maxW = Math.max(...entries.map(e => parseFloat(e.weight) || 0));
+    const maxW = aggregateWeight(entries, inverted);
     const maxR = Math.max(...entries.map(e => parseInt(e.reps) || 0));
     const setCount = entries.length;
-    if (maxW > histBestWeight) histBestWeight = maxW;
+    if (isWeightImprovement(maxW, histBestWeight, inverted)) histBestWeight = maxW;
     if (maxR > histBestReps)   histBestReps   = maxR;
     if (setCount > histBestSets) histBestSets  = setCount;
   }
@@ -77,18 +100,37 @@ async function checkPR(zcql, exerciseName, logId) {
     `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' AND exercise_name = '${safeName}' LIMIT 0, 300`
   );
   const currEntries = currRows.map(r => r.ExerciseEntry).filter(Boolean);
-
   if (currEntries.length === 0) return { pr_hit: false, pr_metric: null };
 
-  const currWeight = Math.max(...currEntries.map(e => parseFloat(e.weight) || 0));
+  const currWeight = aggregateWeight(currEntries, inverted);
   const currReps   = Math.max(...currEntries.map(e => parseInt(e.reps) || 0));
   const currSets   = currEntries.length;
 
-  if (currWeight > histBestWeight) return { pr_hit: true, pr_metric: 'weight' };
-  if (currReps   > histBestReps)   return { pr_hit: true, pr_metric: 'reps' };
-  if (currSets   > histBestSets)   return { pr_hit: true, pr_metric: 'sets' };
+  // Collect ALL PRs hit in this set (can be multiple)
+  const prs = [];
+  if (isWeightImprovement(currWeight, histBestWeight, inverted)) prs.push({ metric: 'weight', previous_best: histBestWeight, new_best: currWeight });
+  if (currReps   > histBestReps)   prs.push({ metric: 'reps',   previous_best: histBestReps,   new_best: currReps });
+  if (currSets   > histBestSets)   prs.push({ metric: 'sets',   previous_best: histBestSets,   new_best: currSets });
 
-  return { pr_hit: false, pr_metric: null };
+  if (prs.length === 0) return { pr_hit: false, pr_metric: null };
+
+  // Persist each PR to PRRecord table (deduplicate: skip if same log+exercise+metric exists)
+  for (const pr of prs) {
+    try {
+      await datastore.table('PRRecord').insertRow({
+        log_id:        logId,
+        exercise_name: exerciseName,
+        metric:        pr.metric,
+        previous_best: pr.previous_best,
+        new_best:      pr.new_best
+      });
+    } catch (e) {
+      // Non-fatal: log but continue
+      console.error('PRRecord insert error:', e.message);
+    }
+  }
+
+  return { pr_hit: true, pr_metric: prs[0].metric, previous_best: prs[0].previous_best, new_best: prs[0].new_best };
 }
 
 module.exports = async (req, res) => {
@@ -144,8 +186,10 @@ module.exports = async (req, res) => {
         weight
       });
       const entry = flatRow(inserted, 'ExerciseEntry');
-      const { pr_hit, pr_metric } = await checkPR(zcql, exercise_name, log_id);
-      return sendJson(res, 201, { entry, pr_hit, pr_metric });
+      // Auto-register exercise name (unique constraint swallows duplicates)
+      try { await datastore.table('ExerciseLibrary').insertRow({ name: exercise_name }); } catch { /* already exists */ }
+      const { pr_hit, pr_metric, previous_best, new_best } = await checkPR(zcql, datastore, exercise_name, log_id);
+      return sendJson(res, 201, { entry, pr_hit, pr_metric, previous_best, new_best });
     }
 
     // GET /logs
@@ -167,7 +211,7 @@ module.exports = async (req, res) => {
     if (method === 'GET' && entriesMatch) {
       const logId = entriesMatch[1];
       const result = await zcql.executeZCQLQuery(
-        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' ORDER BY set_number ASC LIMIT 0, 300`
+        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' ORDER BY ROWID ASC LIMIT 0, 300`
       );
       const entries = result.map(r => r.ExerciseEntry).filter(Boolean);
       return sendJson(res, 200, entries);
@@ -194,6 +238,15 @@ module.exports = async (req, res) => {
       });
     }
 
+    // GET /exercises  (alphabetical list from ExerciseLibrary)
+    if (method === 'GET' && path.endsWith('/exercises')) {
+      const result = await zcql.executeZCQLQuery(
+        'SELECT * FROM ExerciseLibrary ORDER BY name ASC LIMIT 0, 300'
+      );
+      const names = result.map(r => r.ExerciseLibrary?.name).filter(Boolean);
+      return sendJson(res, 200, names);
+    }
+
     // PUT /entry/:id  (edit a single set)
     const editEntryMatch = path.match(/\/entry\/(\d+)$/);
     if (method === 'PUT' && editEntryMatch) {
@@ -207,6 +260,10 @@ module.exports = async (req, res) => {
         reps,
         weight
       });
+      // Auto-register renamed exercise name
+      if (exercise_name) {
+        try { await datastore.table('ExerciseLibrary').insertRow({ name: exercise_name }); } catch { /* already exists */ }
+      }
       return sendJson(res, 200, flatRow(updated, 'ExerciseEntry'));
     }
 
@@ -216,6 +273,169 @@ module.exports = async (req, res) => {
       const entryId = deleteEntryMatch[1];
       await datastore.table('ExerciseEntry').deleteRow(entryId);
       return sendJson(res, 200, { deleted: true });
+    }
+
+    // POST /backfill-prs  (one-time: compute PRs for all historical sessions)
+    if (method === 'POST' && path.endsWith('/backfill-prs')) {
+      // Fetch all closed logs in chronological order (paginated)
+      const closedLogs = await fetchAll(
+        zcql,
+        `SELECT * FROM WorkoutLog WHERE is_closed = 'true' ORDER BY log_date ASC`,
+        'WorkoutLog'
+      );
+
+      // Fetch all entries (paginated)
+      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry`, 'ExerciseEntry');
+      const entriesByLog = {};
+      for (const e of allEntries) {
+        const key = String(e.log_id);
+        if (!entriesByLog[key]) entriesByLog[key] = [];
+        entriesByLog[key].push(e);
+      }
+
+      // Clear existing PR records to avoid duplicates (paginated)
+      const oldPrs = await fetchAll(zcql, `SELECT * FROM PRRecord`, 'PRRecord');
+      for (const p of oldPrs) {
+        await datastore.table('PRRecord').deleteRow(p.ROWID);
+      }
+
+      // Walk sessions chronologically, tracking running bests per exercise
+      const runningBests = {};
+      let prCount = 0;
+
+      for (const log of closedLogs) {
+        const logId = String(log.ROWID);
+        const entries = entriesByLog[logId] || [];
+
+        const byExercise = {};
+        for (const e of entries) {
+          if (!byExercise[e.exercise_name]) byExercise[e.exercise_name] = [];
+          byExercise[e.exercise_name].push(e);
+        }
+
+        for (const [name, exEntries] of Object.entries(byExercise)) {
+          const inverted = INVERTED_WEIGHT_EXERCISES.has(name);
+          const maxW = aggregateWeight(exEntries, inverted);
+          const maxR = Math.max(...exEntries.map(e => parseInt(e.reps) || 0));
+          const sets = exEntries.length;
+          const prev = runningBests[name];
+
+          if (!prev) {
+            // First-ever session for this exercise — no PR to record
+            runningBests[name] = { weight: maxW, reps: maxR, sets };
+            continue;
+          }
+
+          if (isWeightImprovement(maxW, prev.weight, inverted)) {
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'weight', previous_best: prev.weight, new_best: maxW });
+            prev.weight = maxW;
+            prCount++;
+          }
+          if (maxR > prev.reps) {
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'reps',   previous_best: prev.reps,   new_best: maxR });
+            prev.reps = maxR;
+            prCount++;
+          }
+          if (sets > prev.sets) {
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'sets',   previous_best: prev.sets,   new_best: sets });
+            prev.sets = sets;
+            prCount++;
+          }
+        }
+      }
+
+      return sendJson(res, 200, { backfilled: prCount });
+    }
+
+    // GET /prs  (all PR records, enriched with log_date for reliable client-side matching)
+    if (method === 'GET' && path.endsWith('/prs')) {
+      const prs  = await fetchAll(zcql, 'SELECT * FROM PRRecord', 'PRRecord');
+      const logs = await fetchAll(zcql, 'SELECT * FROM WorkoutLog', 'WorkoutLog');
+      const logDateById = {};
+      for (const l of logs) {
+        logDateById[String(l.ROWID)] = l.log_date;
+      }
+      const enriched = prs.map(pr => ({
+        ...pr,
+        log_date: logDateById[String(pr.log_id)] || null
+      }));
+      return sendJson(res, 200, enriched);
+    }
+
+    // GET /current-prs  (one row per exercise: current standing best weight/reps/sets)
+    if (method === 'GET' && path.endsWith('/current-prs')) {
+      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry`, 'ExerciseEntry');
+      const entriesByLog = {};
+      for (const e of allEntries) {
+        const key = String(e.log_id);
+        if (!entriesByLog[key]) entriesByLog[key] = [];
+        entriesByLog[key].push(e);
+      }
+
+      const bestByExercise = {};
+      for (const entries of Object.values(entriesByLog)) {
+        const byExercise = {};
+        for (const e of entries) {
+          if (!byExercise[e.exercise_name]) byExercise[e.exercise_name] = [];
+          byExercise[e.exercise_name].push(e);
+        }
+        for (const [name, exEntries] of Object.entries(byExercise)) {
+          const inverted = INVERTED_WEIGHT_EXERCISES.has(name);
+          const sessionWeight = aggregateWeight(exEntries, inverted);
+          const sessionReps   = Math.max(...exEntries.map(e => parseInt(e.reps) || 0));
+          const sessionSets   = exEntries.length;
+          const prev = bestByExercise[name];
+          if (!prev) {
+            bestByExercise[name] = { exercise_name: name, weight: sessionWeight, reps: sessionReps, sets: sessionSets };
+            continue;
+          }
+          if (isWeightImprovement(sessionWeight, prev.weight, inverted)) prev.weight = sessionWeight;
+          if (sessionReps > prev.reps) prev.reps = sessionReps;
+          if (sessionSets > prev.sets) prev.sets = sessionSets;
+        }
+      }
+
+      const currentPRs = Object.values(bestByExercise).sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
+      return sendJson(res, 200, currentPRs);
+    }
+
+    // GET /export  (full data export: all logs with nested entries, plus all PR records)
+    if (method === 'GET' && path.endsWith('/export')) {
+      const [logs, entries, prs] = await Promise.all([
+        fetchAll(zcql, 'SELECT * FROM WorkoutLog', 'WorkoutLog'),
+        fetchAll(zcql, 'SELECT * FROM ExerciseEntry', 'ExerciseEntry'),
+        fetchAll(zcql, 'SELECT * FROM PRRecord', 'PRRecord')
+      ]);
+
+      const entriesByLog = {};
+      for (const e of entries) {
+        const key = String(e.log_id);
+        if (!entriesByLog[key]) entriesByLog[key] = [];
+        entriesByLog[key].push(e);
+      }
+
+      const logDateById = {};
+      const exportedLogs = logs.map(l => {
+        logDateById[String(l.ROWID)] = l.log_date;
+        return {
+          ...l,
+          preworkout_taken: boolVal(l.preworkout_taken),
+          bcaa_taken:       boolVal(l.bcaa_taken),
+          is_closed:        boolVal(l.is_closed),
+          entries:          entriesByLog[String(l.ROWID)] || []
+        };
+      });
+
+      const exportedPrs = prs.map(pr => ({
+        ...pr,
+        log_date: logDateById[String(pr.log_id)] || null
+      }));
+
+      return sendJson(res, 200, {
+        exported_at: new Date().toISOString(),
+        logs: exportedLogs,
+        prs: exportedPrs
+      });
     }
 
     // DELETE /log/:id
@@ -229,6 +449,16 @@ module.exports = async (req, res) => {
       for (const e of entries) {
         await datastore.table('ExerciseEntry').deleteRow(e.ROWID);
       }
+      // Also delete PR records for this log (best-effort — never block the log deletion)
+      try {
+        const prRows = await zcql.executeZCQLQuery(
+          `SELECT * FROM PRRecord WHERE log_id = '${logId}' LIMIT 0, 300`
+        );
+        const prs = prRows.map(r => r.PRRecord).filter(Boolean);
+        for (const p of prs) {
+          await datastore.table('PRRecord').deleteRow(p.ROWID);
+        }
+      } catch { /* PR records may not exist for this log — continue */ }
       await datastore.table('WorkoutLog').deleteRow(logId);
       return sendJson(res, 200, { deleted: true });
     }
