@@ -8,15 +8,16 @@ OwnPR is a personal gym tracking application built entirely on Catalyst by Zoho.
 
 ## Features
 
-- Landing page with brand identity and quick entry CTA
+- Landing page with brand identity, a quick entry CTA, and a **Current PRs** button for an at-a-glance snapshot
 - Start a new session with body part selection and preworkout logging
 - Add exercises with set-by-set weight and rep tracking
 - Exercise locking — stay on the same exercise across sets; switch with "Next Exercise"
-- Automatic PR detection — alerts when you beat a previous best (volume or max weight)
+- Automatic PR detection — alerts when you beat a previous best (volume, reps, or weight — with inverted weight logic for assisted-machine exercises)
 - Inline edit and delete for individual sets
-- Close session with BCAA intake logging
+- Close session with Whey intake logging (named BCAA before 2026-10-03 — see below)
 - Delete entire sessions (with in-app confirmation modal)
 - History view grouped by month — shows exercises, sets, and supplement data per session
+- One-click **Download JSON** export of all training data from the History tab
 
 ### REST Day Tracking
 - Every day between the first ever log and today that has no workout session is automatically shown as a **REST DAY** row in the history view
@@ -38,10 +39,30 @@ OwnPR is a personal gym tracking application built entirely on Catalyst by Zoho.
 
 ### Daily Rest Day Reminder Email
 - A Catalyst Job function (`rest_day_checker`) runs daily at **8:00 AM IST** via a Catalyst cron
-- If 2 or more consecutive REST days are detected going backwards from yesterday, an email is sent to the owner:
+- If 3 or more consecutive REST days are detected going backwards from yesterday, an email is sent to the owner on the third unreported day:
   - **Subject:** `Move your Ass`
   - **Body:** `Hit your PRs don't lose out on the progress just cause you're lazy....`
 - The email fires every day until an active session is logged — no manual intervention needed to start or stop it
+- Sent via a verified Catalyst Mail sender configuration (Catalyst console → Mail → Email Configuration)
+
+### Current PRs Quick View
+- A **Current PRs** button sits beside "Power Through Now" on the landing page
+- Opens a popup table listing every exercise ever logged with its current-best weight, reps, and sets — a live snapshot, not the full PR event history
+- Recomputed fresh from every logged set (not from the PR event log), so exercises with only a single session ever logged are still included
+
+### Inverted PR Logic for Assisted Exercises
+- **Assisted Dips** and **Assisted Pullups** use assisted machines, where *less* assistance weight means *more* real strength
+- For these two exercises only, a **lower** weight than the previous best counts as a PR — reps and sets still follow the normal "higher is better" rule
+- Applied consistently across live PR detection, the PR history rebuild, and the Current PRs snapshot
+
+### JSON Data Export
+- A **Download JSON** button in the History tab exports the full training history as one file: `ownpr-export-<date>.json`
+- Includes every workout log (with its exercise entries nested inside) and every recorded PR event, plus an `exported_at` timestamp
+- Meant for feeding into external AI tools for a fuller picture of progress over time
+
+### Body Parts & Supplement Naming
+- Body part options now include **Arms and Legs** alongside the original list
+- The supplement checkbox reads **Whey** for any session closed on or after **2026-10-03**; sessions closed before that date keep showing **BCAA** in history, since only the label for new entries changed
 
 ---
 
@@ -110,6 +131,8 @@ Two tables with ZCQL queries for all reads and writes:
 | `POST` | `/entry` | Add a set; triggers PR check |
 | `PUT` | `/entry/:id` | Edit a set (reps/weight) |
 | `DELETE` | `/entry/:id` | Delete a single set |
+| `GET` | `/current-prs` | Current best weight/reps/sets per exercise (snapshot view) |
+| `GET` | `/export` | Full data export — all logs (with nested entries) + PR records, as JSON |
 
 ---
 
@@ -153,11 +176,12 @@ OwnPR/
         ├── App.css
         │
         └── components/
-            ├── LandingPage.jsx        # Logo + "Power Through Now" CTA
+            ├── LandingPage.jsx        # Logo + "Power Through Now" CTA + "Current PRs" button
+            ├── CurrentPRsModal.jsx    # Popup table of current-best weight/reps/sets per exercise
             ├── TodayLog.jsx           # Active session: create, log sets, close/delete
             ├── ExerciseTable.jsx      # Pivot table with exercise locking, inline edit/delete + totals column
-            ├── HistoryAccordion.jsx   # Month-grouped sessions, REST day rows, make-active flow
-            ├── CloseLog.jsx           # BCAA intake form on session close
+            ├── HistoryAccordion.jsx   # Month-grouped sessions, REST day rows, make-active flow, Download JSON
+            ├── CloseLog.jsx           # Whey/BCAA intake form on session close
             ├── PRBanner.jsx           # Animated PR alert banner
             └── ConfirmModal.jsx       # In-app delete confirmation overlay
 ```
@@ -198,4 +222,4 @@ cd .. && catalyst deploy slate pr-trail-ui -ni
 
 | Cron | Schedule | Function | Purpose |
 |---|---|---|---|
-| `rest_day_reminder` | `0 8 * * *` (8 AM IST daily) | `rest_day_checker` | Sends reminder email when 2+ consecutive REST days are detected |
+| `rest_day_reminder` | `0 8 * * *` (8 AM IST daily) | `rest_day_checker` | Sends reminder email when 3+ consecutive REST days are detected |
