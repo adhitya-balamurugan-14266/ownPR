@@ -611,7 +611,7 @@ export default function HistoryAccordion() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ownpr-export-${todayLocalStr()}.json`;
+      a.download = `hypertrophymax-export-${todayLocalStr()}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();

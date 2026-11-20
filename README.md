@@ -1,8 +1,10 @@
-# OwnPR — Personal Gym Progress Tracker
+# HypertrophyMAX — Personal Gym Progress Tracker
 
 **Live URL:** https://own-pr.onslate.in
 
-OwnPR is a personal gym tracking application built entirely on Catalyst by Zoho. Log workout sessions, track sets/reps/weight per exercise, detect personal records (PRs) automatically, and monitor supplement intake (preworkout + BCAA).
+HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built entirely on Catalyst by Zoho. Log workout sessions, track sets/reps/weight per exercise, detect personal records (PRs) automatically, and monitor supplement intake (preworkout + Whey).
+
+> Internal resource names keep the original naming (Catalyst project `OwnPR`, Slate app `pr-trail-ui`, function `pr_trail_api`) since renaming them would change the deployed API URL.
 
 ---
 
@@ -56,7 +58,7 @@ OwnPR is a personal gym tracking application built entirely on Catalyst by Zoho.
 - Applied consistently across live PR detection, the PR history rebuild, and the Current PRs snapshot
 
 ### JSON Data Export
-- A **Download JSON** button in the History tab exports the full training history as one file: `ownpr-export-<date>.json`
+- A **Download JSON** button in the History tab exports the full training history as one file: `hypertrophymax-export-<date>.json`
 - Includes every workout log (with its exercise entries nested inside) and every recorded PR event, plus an `exported_at` timestamp
 - Meant for feeding into external AI tools for a fuller picture of progress over time
 
@@ -164,7 +166,10 @@ OwnPR/
     ├── .env.production                # VITE_API_BASE — function URL baked at build time
     │
     ├── public/
-    │   ├── ownpr-logo.png             # Brand logo (favicon + landing + header)
+    │   ├── hypertrophymax-logo.png    # Full brand logo (landing page)
+    │   ├── hm-mark.png                # HM monogram (header)
+    │   ├── favicon.png                # HM monogram, 64px
+    │   ├── apple-touch-icon.png       # HM monogram, 180px
     │   ├── _redirects                 # SPA fallback: /* /index.html 200
     │   └── client-package.json        # Slate client config (login_redirect)
     │

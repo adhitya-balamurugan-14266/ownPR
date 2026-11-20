@@ -7,7 +7,7 @@ export default function LandingPage({ onStart }) {
   return (
     <div className="landing">
       <div className="landing-logo-wrap">
-        <img src="/ownpr-logo.png" alt="OwnPR" className="landing-logo" />
+        <img src="/hypertrophymax-logo.png" alt="HypertrophyMAX" className="landing-logo" />
       </div>
       <div className="landing-actions">
         <button className="landing-cta" onClick={onStart}>

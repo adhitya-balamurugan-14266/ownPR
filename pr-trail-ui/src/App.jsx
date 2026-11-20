@@ -14,11 +14,11 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <img src="/ownpr-logo.png" alt="OwnPR" className="header-logo" />
+        <img src="/hm-mark.png" alt="HypertrophyMAX" className="header-logo" />
         <nav>
           <button className={tab === 'today'   ? 'active' : ''} onClick={() => setTab('today')}>Today</button>
           <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>History</button>
-          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v8</span>
+          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v9</span>
         </nav>
       </header>
       <main>
