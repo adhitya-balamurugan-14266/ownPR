@@ -2,13 +2,15 @@ import { useState } from 'react';
 import LandingPage from './components/LandingPage.jsx';
 import TodayLog from './components/TodayLog.jsx';
 import HistoryAccordion from './components/HistoryAccordion.jsx';
+import { signOut } from './api.js';
 
-export default function App() {
+export default function App({ sessionUser }) {
   const [screen, setScreen] = useState('landing');
   const [tab, setTab]       = useState('today');
+  const user = sessionUser;
 
   if (screen === 'landing') {
-    return <LandingPage onStart={() => setScreen('app')} />;
+    return <LandingPage onStart={() => setScreen('app')} user={user} />;
   }
 
   return (
@@ -18,7 +20,8 @@ export default function App() {
         <nav>
           <button className={tab === 'today'   ? 'active' : ''} onClick={() => setTab('today')}>Today</button>
           <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>History</button>
-          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v9</span>
+          <button className="nav-logout" onClick={signOut} title={user?.email_id || ''}>Log out</button>
+          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v11</span>
         </nav>
       </header>
       <main>

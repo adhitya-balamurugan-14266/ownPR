@@ -46,8 +46,10 @@ async function fetchAll(zcql, baseQuery, tableName) {
   const rows = [];
   let offset = 0;
   const pageSize = 200;
+  // Paging without a stable order can repeat or skip rows across pages
+  const query = /order by/i.test(baseQuery) ? `${baseQuery}, ROWID ASC` : `${baseQuery} ORDER BY ROWID ASC`;
   while (true) {
-    const result = await zcql.executeZCQLQuery(`${baseQuery} LIMIT ${offset}, ${pageSize}`);
+    const result = await zcql.executeZCQLQuery(`${query} LIMIT ${offset}, ${pageSize}`);
     const page = result.map(r => r[tableName]).filter(Boolean);
     rows.push(...page);
     if (page.length < pageSize) break;
@@ -56,25 +58,59 @@ async function fetchAll(zcql, baseQuery, tableName) {
   return rows;
 }
 
-async function checkPR(zcql, datastore, exerciseName, logId) {
+async function resolveUser(req) {
+  try {
+    const user = await catalyst.initialize(req).userManagement().getCurrentUser();
+    if (user && /^\d+$/.test(String(user.user_id))) {
+      return { user_id: String(user.user_id), email_id: user.email_id };
+    }
+  } catch (err) {
+    console.log('getCurrentUser failed:', err.message);
+  }
+  console.log('Unauthenticated request; x-zc headers present:',
+    Object.keys(req.headers).filter(k => k.startsWith('x-zc')).join(','),
+    'user-type:', req.headers['x-zc-user-type']);
+  return null;
+}
+
+async function ownsRow(zcql, table, rowId, uid) {
+  const rows = await zcql.executeZCQLQuery(
+    `SELECT ROWID FROM ${table} WHERE ROWID = '${rowId}' AND owner_id = '${uid}'`
+  );
+  return rows.length > 0;
+}
+
+async function registerExercise(zcql, datastore, name, uid) {
+  try {
+    const safe = name.replace(/'/g, "''");
+    const rows = await zcql.executeZCQLQuery(
+      `SELECT ROWID FROM ExerciseLibrary WHERE name = '${safe}' AND owner_id = '${uid}'`
+    );
+    if (rows.length === 0) await datastore.table('ExerciseLibrary').insertRow({ name, owner_id: uid });
+  } catch (err) {
+    console.error('ExerciseLibrary register error:', err.message);
+  }
+}
+
+async function checkPR(zcql, datastore, exerciseName, logId, uid) {
   const safeName = exerciseName.replace(/'/g, "''");
   const inverted = INVERTED_WEIGHT_EXERCISES.has(exerciseName);
 
-  const closedResult = await zcql.executeZCQLQuery(
-    `SELECT ROWID FROM WorkoutLog WHERE is_closed = 'true' LIMIT 0, 300`
+  const closedLogs = await fetchAll(
+    zcql,
+    `SELECT ROWID FROM WorkoutLog WHERE is_closed = 'true' AND owner_id = '${uid}'`,
+    'WorkoutLog'
   );
-  const closedIds = new Set(
-    closedResult.map(r => r.WorkoutLog).filter(Boolean).map(r => String(r.ROWID))
-  );
+  const closedIds = new Set(closedLogs.map(r => String(r.ROWID)));
 
   if (closedIds.size === 0) return { pr_hit: false, pr_metric: null };
 
-  const allEntryResult = await zcql.executeZCQLQuery(
-    `SELECT * FROM ExerciseEntry WHERE exercise_name = '${safeName}' LIMIT 0, 300`
+  const allEntries = await fetchAll(
+    zcql,
+    `SELECT * FROM ExerciseEntry WHERE exercise_name = '${safeName}' AND owner_id = '${uid}'`,
+    'ExerciseEntry'
   );
-  const pastEntries = allEntryResult
-    .map(r => r.ExerciseEntry)
-    .filter(Boolean)
+  const pastEntries = allEntries
     .filter(e => String(e.log_id) !== String(logId) && closedIds.has(String(e.log_id)));
 
   if (pastEntries.length === 0) return { pr_hit: false, pr_metric: null };
@@ -97,7 +133,7 @@ async function checkPR(zcql, datastore, exerciseName, logId) {
   }
 
   const currRows = await zcql.executeZCQLQuery(
-    `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' AND exercise_name = '${safeName}' LIMIT 0, 300`
+    `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' AND exercise_name = '${safeName}' AND owner_id = '${uid}' LIMIT 0, 300`
   );
   const currEntries = currRows.map(r => r.ExerciseEntry).filter(Boolean);
   if (currEntries.length === 0) return { pr_hit: false, pr_metric: null };
@@ -122,7 +158,8 @@ async function checkPR(zcql, datastore, exerciseName, logId) {
         exercise_name: exerciseName,
         metric:        pr.metric,
         previous_best: pr.previous_best,
-        new_best:      pr.new_best
+        new_best:      pr.new_best,
+        owner_id:      uid
       });
     } catch (e) {
       // Non-fatal: log but continue
@@ -152,6 +189,15 @@ module.exports = async (req, res) => {
     const path = parsedUrl.pathname;
     const method = req.method;
 
+    const user = await resolveUser(req);
+    if (!user) return sendJson(res, 401, { error: 'Not signed in' });
+    const uid = user.user_id;
+
+    // GET /whoami
+    if (method === 'GET' && path.endsWith('/whoami')) {
+      return sendJson(res, 200, user);
+    }
+
     // POST /log
     if (method === 'POST' && path.endsWith('/log')) {
       const body = await getBody(req);
@@ -163,7 +209,8 @@ module.exports = async (req, res) => {
         preworkout_qty:   preworkout_qty || 0,
         bcaa_taken:       'false',
         bcaa_qty:         0,
-        is_closed:        'false'
+        is_closed:        'false',
+        owner_id:         uid
       });
       const row = flatRow(inserted, 'WorkoutLog');
       return sendJson(res, 201, {
@@ -178,24 +225,27 @@ module.exports = async (req, res) => {
     if (method === 'POST' && path.endsWith('/entry')) {
       const body = await getBody(req);
       const { log_id, exercise_name, set_number, reps, weight } = body;
+      if (!/^\d+$/.test(String(log_id)) || !(await ownsRow(zcql, 'WorkoutLog', log_id, uid))) {
+        return sendJson(res, 404, { error: 'Log not found' });
+      }
       const inserted = await datastore.table('ExerciseEntry').insertRow({
         log_id,
         exercise_name,
         set_number,
         reps,
-        weight
+        weight,
+        owner_id: uid
       });
       const entry = flatRow(inserted, 'ExerciseEntry');
-      // Auto-register exercise name (unique constraint swallows duplicates)
-      try { await datastore.table('ExerciseLibrary').insertRow({ name: exercise_name }); } catch { /* already exists */ }
-      const { pr_hit, pr_metric, previous_best, new_best } = await checkPR(zcql, datastore, exercise_name, log_id);
+      await registerExercise(zcql, datastore, exercise_name, uid);
+      const { pr_hit, pr_metric, previous_best, new_best } = await checkPR(zcql, datastore, exercise_name, log_id, uid);
       return sendJson(res, 201, { entry, pr_hit, pr_metric, previous_best, new_best });
     }
 
     // GET /logs
     if (method === 'GET' && path.endsWith('/logs')) {
       const result = await zcql.executeZCQLQuery(
-        'SELECT * FROM WorkoutLog ORDER BY log_date DESC LIMIT 0, 300'
+        `SELECT * FROM WorkoutLog WHERE owner_id = '${uid}' ORDER BY log_date DESC LIMIT 0, 300`
       );
       const rows = result.map(r => r.WorkoutLog).filter(Boolean).map(r => ({
         ...r,
@@ -211,7 +261,7 @@ module.exports = async (req, res) => {
     if (method === 'GET' && entriesMatch) {
       const logId = entriesMatch[1];
       const result = await zcql.executeZCQLQuery(
-        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' ORDER BY ROWID ASC LIMIT 0, 300`
+        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' AND owner_id = '${uid}' ORDER BY ROWID ASC LIMIT 0, 300`
       );
       const entries = result.map(r => r.ExerciseEntry).filter(Boolean);
       return sendJson(res, 200, entries);
@@ -221,6 +271,7 @@ module.exports = async (req, res) => {
     const closeMatch = path.match(/\/log\/(\d+)\/close$/);
     if (method === 'PUT' && closeMatch) {
       const logId = closeMatch[1];
+      if (!(await ownsRow(zcql, 'WorkoutLog', logId, uid))) return sendJson(res, 404, { error: 'Log not found' });
       const body = await getBody(req);
       const { bcaa_taken, bcaa_qty } = body;
       const updated = await datastore.table('WorkoutLog').updateRow({
@@ -241,9 +292,9 @@ module.exports = async (req, res) => {
     // GET /exercises  (alphabetical list from ExerciseLibrary)
     if (method === 'GET' && path.endsWith('/exercises')) {
       const result = await zcql.executeZCQLQuery(
-        'SELECT * FROM ExerciseLibrary ORDER BY name ASC LIMIT 0, 300'
+        `SELECT * FROM ExerciseLibrary WHERE owner_id = '${uid}' ORDER BY name ASC LIMIT 0, 300`
       );
-      const names = result.map(r => r.ExerciseLibrary?.name).filter(Boolean);
+      const names = [...new Set(result.map(r => r.ExerciseLibrary?.name).filter(Boolean))];
       return sendJson(res, 200, names);
     }
 
@@ -251,6 +302,7 @@ module.exports = async (req, res) => {
     const editEntryMatch = path.match(/\/entry\/(\d+)$/);
     if (method === 'PUT' && editEntryMatch) {
       const entryId = editEntryMatch[1];
+      if (!(await ownsRow(zcql, 'ExerciseEntry', entryId, uid))) return sendJson(res, 404, { error: 'Set not found' });
       const body = await getBody(req);
       const { exercise_name, set_number, reps, weight } = body;
       const updated = await datastore.table('ExerciseEntry').updateRow({
@@ -260,10 +312,7 @@ module.exports = async (req, res) => {
         reps,
         weight
       });
-      // Auto-register renamed exercise name
-      if (exercise_name) {
-        try { await datastore.table('ExerciseLibrary').insertRow({ name: exercise_name }); } catch { /* already exists */ }
-      }
+      if (exercise_name) await registerExercise(zcql, datastore, exercise_name, uid);
       return sendJson(res, 200, flatRow(updated, 'ExerciseEntry'));
     }
 
@@ -271,6 +320,7 @@ module.exports = async (req, res) => {
     const deleteEntryMatch = path.match(/\/entry\/(\d+)$/);
     if (method === 'DELETE' && deleteEntryMatch) {
       const entryId = deleteEntryMatch[1];
+      if (!(await ownsRow(zcql, 'ExerciseEntry', entryId, uid))) return sendJson(res, 404, { error: 'Set not found' });
       await datastore.table('ExerciseEntry').deleteRow(entryId);
       return sendJson(res, 200, { deleted: true });
     }
@@ -280,12 +330,12 @@ module.exports = async (req, res) => {
       // Fetch all closed logs in chronological order (paginated)
       const closedLogs = await fetchAll(
         zcql,
-        `SELECT * FROM WorkoutLog WHERE is_closed = 'true' ORDER BY log_date ASC`,
+        `SELECT * FROM WorkoutLog WHERE is_closed = 'true' AND owner_id = '${uid}' ORDER BY log_date ASC`,
         'WorkoutLog'
       );
 
       // Fetch all entries (paginated)
-      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry`, 'ExerciseEntry');
+      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry WHERE owner_id = '${uid}'`, 'ExerciseEntry');
       const entriesByLog = {};
       for (const e of allEntries) {
         const key = String(e.log_id);
@@ -294,7 +344,7 @@ module.exports = async (req, res) => {
       }
 
       // Clear existing PR records to avoid duplicates (paginated)
-      const oldPrs = await fetchAll(zcql, `SELECT * FROM PRRecord`, 'PRRecord');
+      const oldPrs = await fetchAll(zcql, `SELECT * FROM PRRecord WHERE owner_id = '${uid}'`, 'PRRecord');
       for (const p of oldPrs) {
         await datastore.table('PRRecord').deleteRow(p.ROWID);
       }
@@ -327,17 +377,17 @@ module.exports = async (req, res) => {
           }
 
           if (isWeightImprovement(maxW, prev.weight, inverted)) {
-            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'weight', previous_best: prev.weight, new_best: maxW });
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'weight', previous_best: prev.weight, new_best: maxW, owner_id: uid });
             prev.weight = maxW;
             prCount++;
           }
           if (maxR > prev.reps) {
-            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'reps',   previous_best: prev.reps,   new_best: maxR });
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'reps',   previous_best: prev.reps,   new_best: maxR, owner_id: uid });
             prev.reps = maxR;
             prCount++;
           }
           if (sets > prev.sets) {
-            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'sets',   previous_best: prev.sets,   new_best: sets });
+            await datastore.table('PRRecord').insertRow({ log_id: logId, exercise_name: name, metric: 'sets',   previous_best: prev.sets,   new_best: sets, owner_id: uid });
             prev.sets = sets;
             prCount++;
           }
@@ -349,8 +399,8 @@ module.exports = async (req, res) => {
 
     // GET /prs  (all PR records, enriched with log_date for reliable client-side matching)
     if (method === 'GET' && path.endsWith('/prs')) {
-      const prs  = await fetchAll(zcql, 'SELECT * FROM PRRecord', 'PRRecord');
-      const logs = await fetchAll(zcql, 'SELECT * FROM WorkoutLog', 'WorkoutLog');
+      const prs  = await fetchAll(zcql, `SELECT * FROM PRRecord WHERE owner_id = '${uid}'`, 'PRRecord');
+      const logs = await fetchAll(zcql, `SELECT * FROM WorkoutLog WHERE owner_id = '${uid}'`, 'WorkoutLog');
       const logDateById = {};
       for (const l of logs) {
         logDateById[String(l.ROWID)] = l.log_date;
@@ -364,7 +414,7 @@ module.exports = async (req, res) => {
 
     // GET /current-prs  (one row per exercise: current standing best weight/reps/sets)
     if (method === 'GET' && path.endsWith('/current-prs')) {
-      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry`, 'ExerciseEntry');
+      const allEntries = await fetchAll(zcql, `SELECT * FROM ExerciseEntry WHERE owner_id = '${uid}'`, 'ExerciseEntry');
       const entriesByLog = {};
       for (const e of allEntries) {
         const key = String(e.log_id);
@@ -402,9 +452,9 @@ module.exports = async (req, res) => {
     // GET /export  (full data export: all logs with nested entries, plus all PR records)
     if (method === 'GET' && path.endsWith('/export')) {
       const [logs, entries, prs] = await Promise.all([
-        fetchAll(zcql, 'SELECT * FROM WorkoutLog', 'WorkoutLog'),
-        fetchAll(zcql, 'SELECT * FROM ExerciseEntry', 'ExerciseEntry'),
-        fetchAll(zcql, 'SELECT * FROM PRRecord', 'PRRecord')
+        fetchAll(zcql, `SELECT * FROM WorkoutLog WHERE owner_id = '${uid}'`, 'WorkoutLog'),
+        fetchAll(zcql, `SELECT * FROM ExerciseEntry WHERE owner_id = '${uid}'`, 'ExerciseEntry'),
+        fetchAll(zcql, `SELECT * FROM PRRecord WHERE owner_id = '${uid}'`, 'PRRecord')
       ]);
 
       const entriesByLog = {};
@@ -442,8 +492,9 @@ module.exports = async (req, res) => {
     const deleteMatch = path.match(/\/log\/(\d+)$/);
     if (method === 'DELETE' && deleteMatch) {
       const logId = deleteMatch[1];
+      if (!(await ownsRow(zcql, 'WorkoutLog', logId, uid))) return sendJson(res, 404, { error: 'Log not found' });
       const entryRows = await zcql.executeZCQLQuery(
-        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' LIMIT 0, 300`
+        `SELECT * FROM ExerciseEntry WHERE log_id = '${logId}' AND owner_id = '${uid}' LIMIT 0, 300`
       );
       const entries = entryRows.map(r => r.ExerciseEntry).filter(Boolean);
       for (const e of entries) {
@@ -452,7 +503,7 @@ module.exports = async (req, res) => {
       // Also delete PR records for this log (best-effort — never block the log deletion)
       try {
         const prRows = await zcql.executeZCQLQuery(
-          `SELECT * FROM PRRecord WHERE log_id = '${logId}' LIMIT 0, 300`
+          `SELECT * FROM PRRecord WHERE log_id = '${logId}' AND owner_id = '${uid}' LIMIT 0, 300`
         );
         const prs = prRows.map(r => r.PRRecord).filter(Boolean);
         for (const p of prs) {

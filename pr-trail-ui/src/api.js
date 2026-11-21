@@ -2,8 +2,15 @@ import { addDefaultAppHeaders } from '@zcatalyst/auth-client';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/server/pr_trail_api/execute';
 
+// Slate and the function live on different domains, so the login cookie never
+// reaches the API; the user's identity has to travel as an Authorization token.
 async function authHeaders() {
-  return addDefaultAppHeaders({ 'Content-Type': 'application/json' });
+  const headers = addDefaultAppHeaders({ 'Content-Type': 'application/json' });
+  if (window.catalyst?.auth?.generateAuthToken) {
+    const { access_token } = await window.catalyst.auth.generateAuthToken();
+    if (access_token) headers['Authorization'] = access_token;
+  }
+  return headers;
 }
 
 async function apiFetch(path, options = {}) {
@@ -14,6 +21,10 @@ async function apiFetch(path, options = {}) {
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+export function signOut() {
+  window.catalyst?.auth?.signOut(window.location.origin);
 }
 
 export async function createLog(log_date, body_part, preworkout_taken, preworkout_qty) {

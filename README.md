@@ -1,15 +1,16 @@
 # HypertrophyMAX — Personal Gym Progress Tracker
 
-**Live URL:** https://own-pr.onslate.in
+**Live URL:** https://hypertrophy-max.onslate.in (invite-only — sign in required)
 
 HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built entirely on Catalyst by Zoho. Log workout sessions, track sets/reps/weight per exercise, detect personal records (PRs) automatically, and monitor supplement intake (preworkout + Whey).
 
-> Internal resource names keep the original naming (Catalyst project `OwnPR`, Slate app `pr-trail-ui`, function `pr_trail_api`) since renaming them would change the deployed API URL.
+> Internal resource names keep the original naming (Catalyst project `OwnPR`, function `pr_trail_api`) since renaming them would change the deployed API URL. The Slate app itself is `hypertrophyMAX`.
 
 ---
 
 ## Features
 
+- **Invite-only sign-in** via Catalyst hosted login — every user sees only their own data (see [Authentication](#authentication))
 - Landing page with brand identity, a quick entry CTA, and a **Current PRs** button for an at-a-glance snapshot
 - Start a new session with body part selection and preworkout logging
 - Add exercises with set-by-set weight and rep tracking
@@ -20,6 +21,15 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - Delete entire sessions (with in-app confirmation modal)
 - History view grouped by month — shows exercises, sets, and supplement data per session
 - One-click **Download JSON** export of all training data from the History tab
+
+### Authentication
+- **Invite-only:** public sign-up is disabled; only users invited from the Catalyst console (Authentication → Users) can sign in
+- **Hosted login:** opening the app while signed out redirects to Catalyst's hosted Sign In page (`/__catalyst/auth/login`); after sign-in it returns to `/`
+- **Signed-in state is visible:** the landing page shows *Signed in as &lt;email&gt; · Log out*, and the app header has a **Log out** button
+- **Per-user data:** every row in WorkoutLog, ExerciseEntry, PRRecord and ExerciseLibrary carries an `owner_id` (the Catalyst user ID). Every API query is filtered by it, inserts are stamped with it, and edits/deletes on another user's rows return `404`
+- **Per-user exercise dropdown:** the exercise list is built from each user's own ExerciseLibrary rows
+- **All pre-auth history belongs to the owner account** (`owner_id` back-filled on every existing row); invited users start with an empty slate
+- **How identity reaches the API:** Slate (`onslate.in`) and the function (`catalystserverless.in`) are on different domains, so the login cookie never reaches the API. The frontend calls `catalyst.auth.generateAuthToken()` (Web SDK **4.6.1+**) and sends the token in the `Authorization` header on every request; the function resolves the caller with `userManagement().getCurrentUser()` and answers `401 Not signed in` when there is no user
 
 ### REST Day Tracking
 - Every day between the first ever log and today that has no workout session is automatically shown as a **REST DAY** row in the history view
@@ -41,7 +51,8 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 
 ### Daily Rest Day Reminder Email
 - A Catalyst Job function (`rest_day_checker`) runs daily at **8:00 AM IST** via a Catalyst cron
-- If 3 or more consecutive REST days are detected going backwards from yesterday, an email is sent to the owner on the third unreported day:
+- Runs **per user**: loops every app user and checks only that user's own WorkoutLog rows
+- If 3 or more consecutive REST days are detected going backwards from yesterday, the reminder goes to **that user's own email**:
   - **Subject:** `Move your Ass`
   - **Body:** `Hit your PRs don't lose out on the progress just cause you're lazy....`
 - The email fires every day until an active session is logged — no manual intervention needed to start or stop it
@@ -71,11 +82,11 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 ## Catalyst Components Used
 
 ### Catalyst Slate
-- **App name:** `pr-trail-ui`
+- **App name:** `hypertrophyMAX` (must match `catalyst.json` → `slate[0].name`; the CLI deploys Slate by name and creates a new app if the name doesn't exist)
 - **Framework:** React + Vite
-- Hosts the frontend SPA at `https://own-pr.onslate.in`
+- Hosts the frontend SPA at `https://hypertrophy-max.onslate.in`
 - Configured via `pr-trail-ui/dist/.catalyst/slate-config.toml` (recreated after each build)
-- Auth handled via the Catalyst Web SDK CDN (`catalystWebSDK.js`) loaded in `index.html`
+- Auth handled via the Catalyst Web SDK **4.6.1** CDN (`catalystWebSDK.js`) + `/__catalyst/sdk/init.js` loaded in `index.html`
 
 ### Catalyst Functions
 
@@ -89,11 +100,11 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 **`rest_day_checker`** — Job
 - **Runtime:** Node.js 24 (`node24`)
 - **Type:** `job` — invoked by the Catalyst cron scheduler, not via HTTP
-- Queries WorkoutLog for consecutive REST days; sends a reminder email if 2+ are found
+- For each app user, queries their WorkoutLog rows for consecutive REST days; emails that user if 3+ are found
 - Triggered daily at **8:00 AM IST** by the `rest_day_reminder` cron job
 
 ### Catalyst DataStore
-Two tables with ZCQL queries for all reads and writes:
+Four tables with ZCQL queries for all reads and writes. Every table has an `owner_id` column (Text, Catalyst user ID) that scopes rows to their user:
 
 **WorkoutLog**
 | Column | Type | Notes |
@@ -105,6 +116,7 @@ Two tables with ZCQL queries for all reads and writes:
 | `bcaa_taken` | Text | `'true'` / `'false'` |
 | `bcaa_qty` | Number | Scoops |
 | `is_closed` | Text | `'true'` / `'false'` |
+| `owner_id` | Text | Catalyst user ID of the owner |
 
 **ExerciseEntry**
 | Column | Type | Notes |
@@ -114,17 +126,25 @@ Two tables with ZCQL queries for all reads and writes:
 | `set_number` | Number | 1-based, gaps allowed after deletes |
 | `reps` | Number | |
 | `weight` | Number | kg |
+| `owner_id` | Text | Catalyst user ID of the owner |
+
+**PRRecord** — one row per PR event (exercise, weight, reps, sets, date, `owner_id`)
+
+**ExerciseLibrary** — each user's exercise names for the dropdown (`name`, `owner_id`; the same name can exist once per user)
 
 ### Catalyst Auth Client
 - **Package:** `@zcatalyst/auth-client`
-- Used in the frontend (`src/api.js`) via `addDefaultAppHeaders()` to attach Catalyst auth tokens to every API request from the browser
+- Used in the frontend (`src/api.js`) via `addDefaultAppHeaders()` for the Catalyst app headers; the user's identity is added separately as `Authorization: <token>` from `catalyst.auth.generateAuthToken()`
 
 ---
 
 ## API Routes
 
+All routes require a signed-in user (`401` otherwise) and only ever read or write that user's rows.
+
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/whoami` | The signed-in user's ID and email |
 | `POST` | `/log` | Create a new workout session |
 | `GET` | `/logs` | Fetch all sessions |
 | `PUT` | `/log/:id/close` | Close session, record BCAA data |
@@ -133,6 +153,9 @@ Two tables with ZCQL queries for all reads and writes:
 | `POST` | `/entry` | Add a set; triggers PR check |
 | `PUT` | `/entry/:id` | Edit a set (reps/weight) |
 | `DELETE` | `/entry/:id` | Delete a single set |
+| `GET` | `/exercises` | The user's exercise names (dropdown) |
+| `GET` | `/prs` | The user's PR event history |
+| `POST` | `/backfill-prs` | Rebuild the user's PR history from their logged sets |
 | `GET` | `/current-prs` | Current best weight/reps/sets per exercise (snapshot view) |
 | `GET` | `/export` | Full data export — all logs (with nested entries) + PR records, as JSON |
 
@@ -174,14 +197,14 @@ OwnPR/
     │   └── client-package.json        # Slate client config (login_redirect)
     │
     └── src/
-        ├── main.jsx                   # Catalyst getCredentials() before React mount
-        ├── App.jsx                    # Screen router: landing → app (today/history tabs)
-        ├── api.js                     # All fetch helpers with Catalyst auth headers
+        ├── main.jsx                   # Auth gate: hosted-login redirect if signed out, then React mount
+        ├── App.jsx                    # Screen router: landing → app (today/history tabs) + Log out
+        ├── api.js                     # All fetch helpers with Authorization token + signOut()
         ├── index.css                  # Global dark theme styles
         ├── App.css
         │
         └── components/
-            ├── LandingPage.jsx        # Logo + "Power Through Now" CTA + "Current PRs" button
+            ├── LandingPage.jsx        # Logo + CTAs + "Signed in as … · Log out"
             ├── CurrentPRsModal.jsx    # Popup table of current-best weight/reps/sets per exercise
             ├── TodayLog.jsx           # Active session: create, log sets, close/delete
             ├── ExerciseTable.jsx      # Pivot table with exercise locking, inline edit/delete + totals column
@@ -217,8 +240,9 @@ catalyst deploy --only functions:rest_day_checker -ni
 
 # Build + deploy Slate (slate-config.toml must be recreated after each build)
 cd pr-trail-ui && npm run build
-mkdir -p dist/.catalyst && printf '[app]\nname = "pr-trail-ui"\n' > dist/.catalyst/slate-config.toml
-cd .. && catalyst deploy slate pr-trail-ui -ni
+mkdir -p dist/.catalyst && printf '[app]\nname = "hypertrophyMAX"\n' > dist/.catalyst/slate-config.toml
+cd .. && catalyst deploy slate hypertrophyMAX -ni
+# Expect: App Url(hypertrophyMAX): https://hypertrophy-max.onslate.in
 ```
 
 > **Note:** `slate-config.toml` lives inside `dist/.catalyst/` and is wiped by every `npm run build`. Always recreate it before deploying Slate.
@@ -227,4 +251,4 @@ cd .. && catalyst deploy slate pr-trail-ui -ni
 
 | Cron | Schedule | Function | Purpose |
 |---|---|---|---|
-| `rest_day_reminder` | `0 8 * * *` (8 AM IST daily) | `rest_day_checker` | Sends reminder email when 3+ consecutive REST days are detected |
+| `rest_day_reminder` | `0 8 * * *` (8 AM IST daily) | `rest_day_checker` | Emails each user whose own history shows 3+ consecutive REST days |

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import CurrentPRsModal from './CurrentPRsModal.jsx';
+import { signOut } from '../api.js';
 
-export default function LandingPage({ onStart }) {
+export default function LandingPage({ onStart, user }) {
   const [showCurrentPRs, setShowCurrentPRs] = useState(false);
 
   return (
@@ -17,6 +18,11 @@ export default function LandingPage({ onStart }) {
           Current PRs
         </button>
       </div>
+      {user && (
+        <p className="landing-user">
+          Signed in as {user.email_id || 'you'} · <button className="link-btn" onClick={signOut}>Log out</button>
+        </p>
+      )}
       {showCurrentPRs && <CurrentPRsModal onClose={() => setShowCurrentPRs(false)} />}
     </div>
   );
