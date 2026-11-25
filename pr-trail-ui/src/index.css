@@ -481,6 +481,85 @@ button { cursor: pointer; border: none; font-family: inherit; font-size: 14px; f
   color: var(--text-muted);
 }
 
+/* ── Download JSON menu ── */
+.dl-wrap { position: relative; }
+.dl-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.dl-menu button {
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.dl-menu button:hover { background: rgba(255, 215, 0, 0.08); color: #ffd700; }
+
+.dl-date-input {
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  background: var(--bg, #0a0a0a);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 15px;
+  color-scheme: dark;
+}
+.modal-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+
+/* ── Month picker ── */
+.mp-year {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 12px;
+}
+.mp-year-label { font-size: 16px; font-weight: 700; color: var(--text); }
+.mp-arrow {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+}
+.mp-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
+.mp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.mp-month {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mp-month:hover:not(:disabled):not(.selected) { border-color: var(--text-muted); }
+.mp-month.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mp-month:disabled { opacity: 0.25; cursor: not-allowed; }
+
 /* ── History ── */
 .history { display: flex; flex-direction: column; gap: 12px; }
 

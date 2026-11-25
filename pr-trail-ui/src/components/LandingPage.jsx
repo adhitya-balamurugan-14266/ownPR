@@ -2,7 +2,7 @@ import { useState } from 'react';
 import CurrentPRsModal from './CurrentPRsModal.jsx';
 import { signOut } from '../api.js';
 
-export default function LandingPage({ onStart, user }) {
+export default function LandingPage({ onStart, onHistory, user }) {
   const [showCurrentPRs, setShowCurrentPRs] = useState(false);
 
   return (
@@ -16,6 +16,9 @@ export default function LandingPage({ onStart, user }) {
         </button>
         <button className="landing-secondary" onClick={() => setShowCurrentPRs(true)}>
           Current PRs
+        </button>
+        <button className="landing-secondary" onClick={onHistory}>
+          History
         </button>
       </div>
       {user && (

@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
-import { fetchLogs, fetchEntries, fetchPRs, backfillPRs, deleteLog, createLog, closeLog, exportAllData } from '../api.js';
+import { fetchLogs, fetchEntries, fetchPRs, backfillPRs, deleteLog, createLog, closeLog } from '../api.js';
 import ExerciseTable from './ExerciseTable.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
+import DownloadMenu from './DownloadMenu.jsx';
 
 const BODY_PARTS = [
   'Chest', 'Shoulders', 'Back', 'Arms', 'Legs', 'Cardio',
   'Chest and Triceps', 'Shoulders and Legs', 'Back and Biceps', 'Arms and Legs',
-  'Push Day', 'Pull Day', 'Custom'
+  'Push Day A (Chest, Shoulder, Triceps)',
+  'Push Day B (Chest, Shoulder, Triceps)',
+  'Pull Day A (Back, Shoulder, Biceps)',
+  'Pull Day B (Back, Shoulder, Biceps)',
+  'Leg Day',
+  'Custom'
 ];
 
 const WHEY_CUTOFF_DATE = '2026-10-03'; // supplement renamed BCAA -> Whey for sessions logged from this date on
@@ -572,8 +578,6 @@ export default function HistoryAccordion() {
   const [loadError, setLoadError]   = useState('');
   const [syncing, setSyncing]       = useState(false);
   const [syncMsg, setSyncMsg]       = useState('');
-  const [exporting, setExporting]   = useState(false);
-  const [exportError, setExportError] = useState('');
 
   useEffect(() => {
     Promise.all([fetchLogs(), fetchPRs()])
@@ -602,27 +606,6 @@ export default function HistoryAccordion() {
     }
   }
 
-  async function handleDownloadJSON() {
-    setExporting(true);
-    setExportError('');
-    try {
-      const data = await exportAllData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `hypertrophymax-export-${todayLocalStr()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setExportError(err.message);
-    } finally {
-      setExporting(false);
-    }
-  }
-
   function handleDelete(rowid) {
     setLogs(prev => prev.filter(l => l.ROWID !== rowid));
   }
@@ -643,12 +626,9 @@ export default function HistoryAccordion() {
         <button className="pr-sync-btn" onClick={handleBackfill} disabled={syncing}>
           {syncing ? 'Calculating…' : '🏆 Sync PR History'}
         </button>
-        <button className="pr-sync-btn" onClick={handleDownloadJSON} disabled={exporting}>
-          {exporting ? 'Preparing…' : '⬇ Download JSON'}
-        </button>
+        <DownloadMenu firstYear={Number(logs.reduce((min, l) => (l.log_date < min ? l.log_date : min), logs[0].log_date).slice(0, 4))} />
         {prCount !== null && !syncMsg && <span className="pr-sync-msg">{prCount} PR record{prCount !== 1 ? 's' : ''} loaded</span>}
         {syncMsg && <span className="pr-sync-msg">{syncMsg}</span>}
-        {exportError && <span className="pr-sync-msg" style={{ color: '#ff6b6b' }}>Error: {exportError}</span>}
       </div>
       {months.map(m => (
         <MonthSection

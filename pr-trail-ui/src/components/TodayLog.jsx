@@ -8,7 +8,12 @@ import CloseLog from './CloseLog.jsx';
 const BODY_PARTS = [
   'Chest', 'Shoulders', 'Back', 'Arms', 'Legs', 'Cardio',
   'Chest and Triceps', 'Shoulders and Legs', 'Back and Biceps', 'Arms and Legs',
-  'Push Day', 'Pull Day', 'Custom'
+  'Push Day A (Chest, Shoulder, Triceps)',
+  'Push Day B (Chest, Shoulder, Triceps)',
+  'Pull Day A (Back, Shoulder, Biceps)',
+  'Pull Day B (Back, Shoulder, Biceps)',
+  'Leg Day',
+  'Custom'
 ];
 
 function todayStr() {

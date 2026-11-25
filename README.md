@@ -11,7 +11,7 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 ## Features
 
 - **Invite-only sign-in** via Catalyst hosted login — every user sees only their own data (see [Authentication](#authentication))
-- Landing page with brand identity, a quick entry CTA, and a **Current PRs** button for an at-a-glance snapshot
+- Landing page with brand identity and three buttons: **Power Through Now** (opens Today), **Current PRs** (at-a-glance snapshot) and **History** (opens the past-sessions view directly)
 - Start a new session with body part selection and preworkout logging
 - Add exercises with set-by-set weight and rep tracking
 - Exercise locking — stay on the same exercise across sets; switch with "Next Exercise"
@@ -20,7 +20,7 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - Close session with Whey intake logging (named BCAA before 2026-10-03 — see below)
 - Delete entire sessions (with in-app confirmation modal)
 - History view grouped by month — shows exercises, sets, and supplement data per session
-- One-click **Download JSON** export of all training data from the History tab
+- **Download JSON** menu in the History tab: export today, any day, any month, or the full history
 
 ### Authentication
 - **Invite-only:** public sign-up is disabled; only users invited from the Catalyst console (Authentication → Users) can sign in
@@ -29,7 +29,10 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - **Per-user data:** every row in WorkoutLog, ExerciseEntry, PRRecord and ExerciseLibrary carries an `owner_id` (the Catalyst user ID). Every API query is filtered by it, inserts are stamped with it, and edits/deletes on another user's rows return `404`
 - **Per-user exercise dropdown:** the exercise list is built from each user's own ExerciseLibrary rows
 - **All pre-auth history belongs to the owner account** (`owner_id` back-filled on every existing row); invited users start with an empty slate
-- **How identity reaches the API:** Slate (`onslate.in`) and the function (`catalystserverless.in`) are on different domains, so the login cookie never reaches the API. The frontend calls `catalyst.auth.generateAuthToken()` (Web SDK **4.6.1+**) and sends the token in the `Authorization` header on every request; the function resolves the caller with `userManagement().getCurrentUser()` and answers `401 Not signed in` when there is no user
+- **How identity reaches the API:** the frontend calls the function on Slate's own domain (`https://hypertrophy-max.onslate.in/server/pr_trail_api/execute/...`). Slate forwards `/server/...` requests to the function when they carry the Catalyst app headers (`Accept: application/vnd.catalyst.v2+json`, `CATALYST-COMPONENT: true`, added by `addDefaultAppHeaders()`); without those headers Slate serves `index.html` instead. Because the call is same-origin, the login cookie goes with it, and the function resolves the caller with `userManagement().getCurrentUser()`, answering `401 Not signed in` when there is no user
+- **Why not a cross-domain token:** the app previously called the `catalystserverless.in` URL with a token from `catalyst.auth.generateAuthToken()`. On 2026-11-24 Catalyst started rejecting the SDK's internal `custom-token` request (400 `PATTERN_NOT_MATCHED`) and the SDK then hung without resolving, leaving the app stuck on "Loading…". The same-origin route needs no token at all
+- **CSRF:** `X-ZCSRF-TOKEN: zd_csrparam=<ZD_CSRF_TOKEN cookie>` is added only when that cookie is readable; an empty value is never sent (Catalyst rejects `zd_csrparam=` with `PATTERN_NOT_MATCHED`)
+- **No endless loading:** every API call has a 20-second timeout, and a `401` shows *Session expired: tap Log out and sign in again*
 
 ### REST Day Tracking
 - Every day between the first ever log and today that has no workout session is automatically shown as a **REST DAY** row in the history view
@@ -69,12 +72,19 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - Applied consistently across live PR detection, the PR history rebuild, and the Current PRs snapshot
 
 ### JSON Data Export
-- A **Download JSON** button in the History tab exports the full training history as one file: `hypertrophymax-export-<date>.json`
-- Includes every workout log (with its exercise entries nested inside) and every recorded PR event, plus an `exported_at` timestamp
+- The **⬇ Download JSON ▾** button in the History tab opens a menu with four options:
+  - **Download Today**: today's session
+  - **Download Any Day**: opens a date picker (up to today), then exports that day's session
+  - **Download Any Month**: opens a month picker (year arrows + Jan–Dec grid, future months disabled), then exports every session in that month
+  - **Download Legacy**: the full history, every session from the latest back to the first
+- Files are named `hypertrophymax-<today|day|month|legacy>-<date>.json` (for example `hypertrophymax-month-2026-10.json`)
+- Each file has `exported_at`, a `scope` (`{type, value}`), the matching workout `logs` (newest first, each with its exercise entries nested inside) and the matching `prs` events
+- If a Today, Day or Month pick has no sessions (for example, a rest day), nothing is downloaded and an inline "No sessions logged…" message is shown
+- Filtering happens in the browser on top of `GET /export`, which only ever returns the signed-in user's data
 - Meant for feeding into external AI tools for a fuller picture of progress over time
 
 ### Body Parts & Supplement Naming
-- Body part options now include **Arms and Legs** alongside the original list
+- Body part options include **Arms and Legs**, plus split days **Push Day A / B (Chest, Shoulder, Triceps)**, **Pull Day A / B (Back, Shoulder, Biceps)** and **Leg Day** (these replaced the old generic Push Day / Pull Day options; past sessions logged under the old names keep their label in history)
 - The supplement checkbox reads **Whey** for any session closed on or after **2026-10-03**; sessions closed before that date keep showing **BCAA** in history, since only the label for new entries changed
 
 ---
@@ -86,7 +96,8 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - **Framework:** React + Vite
 - Hosts the frontend SPA at `https://hypertrophy-max.onslate.in`
 - Configured via `pr-trail-ui/dist/.catalyst/slate-config.toml` (recreated after each build)
-- Auth handled via the Catalyst Web SDK **4.6.1** CDN (`catalystWebSDK.js`) + `/__catalyst/sdk/init.js` loaded in `index.html`
+- Auth handled via the Catalyst Web SDK **4.6.1** CDN (`catalystWebSDK.js`) + `/__catalyst/sdk/init.js` loaded in `index.html` (login gate + sign-out)
+- Also fronts the API: `/server/pr_trail_api/execute/...` on the Slate domain is forwarded to the function (see [Authentication](#authentication))
 
 ### Catalyst Functions
 
@@ -95,7 +106,7 @@ HypertrophyMAX (formerly OwnPR) is a personal gym tracking application built ent
 - **Type:** `advancedio` (raw HTTP handler — full control over request/response)
 - Serves as the REST API backend for all data operations
 - Uses `zcatalyst-sdk-node` for DataStore and ZCQL access
-- **Function URL:** `https://ownpr-60047186223.development.catalystserverless.in/server/pr_trail_api/execute`
+- **Function URL:** `https://ownpr-60047186223.development.catalystserverless.in/server/pr_trail_api/execute` (the app itself calls it through Slate as `/server/pr_trail_api/execute`)
 
 **`rest_day_checker`** — Job
 - **Runtime:** Node.js 24 (`node24`)
@@ -110,7 +121,7 @@ Four tables with ZCQL queries for all reads and writes. Every table has an `owne
 | Column | Type | Notes |
 |---|---|---|
 | `log_date` | Text | `YYYY-MM-DD` |
-| `body_part` | Text | e.g. Chest, Push Day |
+| `body_part` | Text | e.g. Chest, Push Day A (Chest, Shoulder, Triceps) |
 | `preworkout_taken` | Text | `'true'` / `'false'` |
 | `preworkout_qty` | Number | Scoops |
 | `bcaa_taken` | Text | `'true'` / `'false'` |
@@ -134,7 +145,7 @@ Four tables with ZCQL queries for all reads and writes. Every table has an `owne
 
 ### Catalyst Auth Client
 - **Package:** `@zcatalyst/auth-client`
-- Used in the frontend (`src/api.js`) via `addDefaultAppHeaders()` for the Catalyst app headers; the user's identity is added separately as `Authorization: <token>` from `catalyst.auth.generateAuthToken()`
+- Used in the frontend (`src/api.js`) via `addDefaultAppHeaders()` for the Catalyst app headers, which Slate needs in order to forward `/server/...` calls to the function
 
 ---
 
@@ -186,7 +197,7 @@ OwnPR/
     ├── vite.config.js
     ├── package.json
     ├── package-lock.json
-    ├── .env.production                # VITE_API_BASE — function URL baked at build time
+    ├── .env.production                # VITE_API_BASE=/server/pr_trail_api/execute (same-origin via Slate)
     │
     ├── public/
     │   ├── hypertrophymax-logo.png    # Full brand logo (landing page)
@@ -199,16 +210,17 @@ OwnPR/
     └── src/
         ├── main.jsx                   # Auth gate: hosted-login redirect if signed out, then React mount
         ├── App.jsx                    # Screen router: landing → app (today/history tabs) + Log out
-        ├── api.js                     # All fetch helpers with Authorization token + signOut()
+        ├── api.js                     # Same-origin fetch helpers (Catalyst headers, CSRF, 20s timeout) + signOut()
         ├── index.css                  # Global dark theme styles
         ├── App.css
         │
         └── components/
-            ├── LandingPage.jsx        # Logo + CTAs + "Signed in as … · Log out"
+            ├── LandingPage.jsx        # Logo + Power Through Now / Current PRs / History + "Signed in as … · Log out"
             ├── CurrentPRsModal.jsx    # Popup table of current-best weight/reps/sets per exercise
+            ├── DownloadMenu.jsx       # Download JSON menu: Today / Any Day / Any Month / Legacy + pickers
             ├── TodayLog.jsx           # Active session: create, log sets, close/delete
             ├── ExerciseTable.jsx      # Pivot table with exercise locking, inline edit/delete + totals column
-            ├── HistoryAccordion.jsx   # Month-grouped sessions, REST day rows, make-active flow, Download JSON
+            ├── HistoryAccordion.jsx   # Month-grouped sessions, REST day rows, make-active flow, Download menu
             ├── CloseLog.jsx           # Whey/BCAA intake form on session close
             ├── PRBanner.jsx           # Animated PR alert banner
             └── ConfirmModal.jsx       # In-app delete confirmation overlay

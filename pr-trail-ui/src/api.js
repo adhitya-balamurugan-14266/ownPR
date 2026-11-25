@@ -2,20 +2,45 @@ import { addDefaultAppHeaders } from '@zcatalyst/auth-client';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/server/pr_trail_api/execute';
 
-// Slate and the function live on different domains, so the login cookie never
-// reaches the API; the user's identity has to travel as an Authorization token.
-async function authHeaders() {
-  const headers = addDefaultAppHeaders({ 'Content-Type': 'application/json' });
-  if (window.catalyst?.auth?.generateAuthToken) {
-    const { access_token } = await window.catalyst.auth.generateAuthToken();
-    if (access_token) headers['Authorization'] = access_token;
+const REQUEST_TIMEOUT_MS = 20000;
+
+function readCookie(name) {
+  for (const part of document.cookie.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx > -1 && part.slice(0, idx).trim() === name) return part.slice(idx + 1).trim();
   }
+  return '';
+}
+
+// The API is called on Slate's own domain (/server/...). Slate forwards it to the
+// function when the Catalyst app headers are present, and the login cookie goes
+// along with it, so no cross-domain token (generateAuthToken) is needed.
+function authHeaders() {
+  const headers = addDefaultAppHeaders({ 'Content-Type': 'application/json' });
+  // Never send an empty CSRF value: Catalyst rejects "zd_csrparam=" with PATTERN_NOT_MATCHED
+  const csrf = readCookie('ZD_CSRF_TOKEN');
+  if (csrf) headers['X-ZCSRF-TOKEN'] = `zd_csrparam=${csrf}`;
   return headers;
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: authHeaders(),
+      credentials: 'include',
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('The server took too long to respond. Please try again.');
+    throw new Error(`Couldn't reach the server (${err.message}).`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401) throw new Error('Session expired: tap Log out and sign in again.');
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);

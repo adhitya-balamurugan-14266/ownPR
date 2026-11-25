@@ -10,7 +10,13 @@ export default function App({ sessionUser }) {
   const user = sessionUser;
 
   if (screen === 'landing') {
-    return <LandingPage onStart={() => setScreen('app')} user={user} />;
+    return (
+      <LandingPage
+        onStart={() => { setTab('today'); setScreen('app'); }}
+        onHistory={() => { setTab('history'); setScreen('app'); }}
+        user={user}
+      />
+    );
   }
 
   return (
@@ -21,7 +27,7 @@ export default function App({ sessionUser }) {
           <button className={tab === 'today'   ? 'active' : ''} onClick={() => setTab('today')}>Today</button>
           <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>History</button>
           <button className="nav-logout" onClick={signOut} title={user?.email_id || ''}>Log out</button>
-          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v11</span>
+          <span style={{fontSize:'10px',color:'#444',padding:'0 6px',alignSelf:'center'}}>v15</span>
         </nav>
       </header>
       <main>
